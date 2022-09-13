@@ -12,9 +12,9 @@
         naersk-lib = pkgs.callPackage naersk { };
       in
       {
-        defaultPackage = naersk-lib.buildPackage ./.;
+        packages.default = naersk-lib.buildPackage ./.;
 
-        defaultApp = utils.lib.mkApp {
+        apps.default = utils.lib.mkApp {
           drv = self.defaultPackage."${system}";
         };
 
