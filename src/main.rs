@@ -28,8 +28,8 @@ fn main() {
                 .takes_value(false),
         )
         .subcommand(
-            SubCommand::with_name("run")
-                .about("Builds and runs the ISO file")
+            SubCommand::with_name("build")
+                .about("Builds the ISO file")
                 .arg(
                     Arg::with_name("grub")
                         .help("Encapsulates your kernel with grub 2")
@@ -40,12 +40,20 @@ fn main() {
                         .help("Enables verbose mode")
                         .short("v")
                         .takes_value(false),
+                ),
+        ).subcommand(
+            SubCommand::with_name("run")
+                .about("Builds and runs the ISO file")
+                .arg(
+                    Arg::with_name("verbose")
+                        .help("Enables verbose mode")
+                        .short("v")
+                        .takes_value(false),
                 )
                 .arg(
                     Arg::with_name("debug")
-                        .help("Runs kernel with debug run command")
-                        .short("d")
-                        .takes_value(false),
+                        .help("Runs the emulator in debug mode")
+                        .takes_value(true),
                 ),
         )
         .get_matches();
@@ -60,11 +68,30 @@ fn main() {
         }
         debug!("Args: {:?}", std::env::args());
 
-        run(matches);
+        let artifacts = build(matches);
+
+        run::run(artifacts.config, &artifacts.iso_img, artifacts.is_test, matches.is_present("debug")).unwrap();
+    }
+
+    if let Some(matches) = matches.subcommand_matches("build") {
+        if matches.is_present("verbose") {
+            log::set_max_level(LevelFilter::Debug);
+        }
+        debug!("Args: {:?}", std::env::args());
+
+        build(matches);
     }
 }
 
-fn run(matches: &ArgMatches) {
+#[derive(Debug, Clone)]
+struct BuildMetadata {
+    pub config: config::Config,
+    pub is_test: bool,
+    pub iso_img: PathBuf,
+}
+
+
+fn build(matches: &ArgMatches) -> BuildMetadata {
     /*
         Where do these environment variables come from?
         https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
@@ -184,7 +211,11 @@ fn run(matches: &ArgMatches) {
         glue_grub(&iso_dir, &iso_img, &merged_exe);
     }
 
-    run::run(config, &iso_img, is_test, matches.is_present("debug")).unwrap();
+    return BuildMetadata {
+        config,
+        iso_img,
+        is_test
+    };
 }
 
 fn glue_grub(iso_dir: &PathBuf, iso_img: &PathBuf, executable: &PathBuf) {
