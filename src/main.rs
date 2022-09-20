@@ -21,7 +21,7 @@ fn main() -> ExitCode {
 
     let mut app = App::new("Glue gun")
         .author("Luis Hebendanz <luis.nixos@gmail.com")
-        .about("Glues together a rust bootloader and kernel to generate a bootable ISO file")
+        .about("Glues together a rust bootloader and ELF kernel to generate a bootable ISO file")
         .arg(
             Arg::with_name("verbose")
                 .short('v')
@@ -35,11 +35,6 @@ fn main() -> ExitCode {
             SubCommand::with_name("build")
                 .about("Builds the ISO file")
                 .arg(
-                    Arg::with_name("grub")
-                        .help("Encapsulates the kernel with grub 2")
-                        .takes_value(false),
-                )
-                .arg(
                     Arg::with_name("verbose")
                         .help("Enables verbose mode")
                         .short('v')
@@ -49,12 +44,6 @@ fn main() -> ExitCode {
         .subcommand(
             SubCommand::with_name("run")
                 .about("Builds and runs the ISO file")
-                .arg(
-                    Arg::with_name("grub")
-                        .help("Encapsulates the kernel with grub 2")
-                        
-                        .takes_value(false),
-                )
                 .arg(
                     Arg::with_name("verbose")
                         .help("Enables verbose mode")
@@ -68,13 +57,13 @@ fn main() -> ExitCode {
                 ),
         )
         .arg(
-        arg!([KERNEL])
+        arg!(<KERNEL>)
         .help("Path to kernel ELF file")
-        .required(true)
         .value_parser(value_parser!(PathBuf))
         );
 
     let matches = app.clone().get_matches();
+    let kernel: &PathBuf = matches.get_one("KERNEL").expect("Path to kernel missing");
 
     if matches.is_present("verbose") {
         log::set_max_level(LevelFilter::Debug);
@@ -86,7 +75,7 @@ fn main() -> ExitCode {
         }
         debug!("Args: {:?}", std::env::args());
 
-        let artifacts = build(matches);
+        let artifacts = build(matches, kernel);
 
         run::run(artifacts.config, &artifacts.iso_img, artifacts.is_test, matches.is_present("debug")).unwrap();
         return ExitCode::SUCCESS;
@@ -98,7 +87,7 @@ fn main() -> ExitCode {
         }
         debug!("Args: {:?}", std::env::args());
 
-        build(matches);
+        build(matches, kernel);
 
         return ExitCode::SUCCESS;
     }
@@ -115,7 +104,7 @@ struct BuildMetadata {
 }
 
 
-fn build(matches: &ArgMatches) -> BuildMetadata {
+fn build(matches: &ArgMatches, kernel: &Path) -> BuildMetadata {
     /*
         Where do these environment variables come from?
         https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
@@ -139,9 +128,7 @@ fn build(matches: &ArgMatches) -> BuildMetadata {
     let is_verbose = matches.is_present("verbose");
     let is_release;
     let is_test;
-    let kernel;
     {
-        kernel = Path::new(matches.value_of("grub").expect("missing executable path"));
         target_dir = kernel
             .parent()
             .expect("Target executable does not have a parent directory")
