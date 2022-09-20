@@ -1,4 +1,4 @@
-use clap::{App, Arg, arg, ArgMatches, value_parser, SubCommand};
+use clap::{App, Arg, ArgMatches, value_parser, SubCommand};
 use log::*;
 use std::{
     env,
@@ -39,9 +39,12 @@ fn main() -> ExitCode {
                         .help("Enables verbose mode")
                         .short('v')
                         .takes_value(false),
-                ).arg(
-                    arg!(<KERNEL>)
+                )
+                .arg(
+                    Arg::with_name("kernel")
                     .help("Path to kernel ELF file")
+                    .takes_value(true)
+                    .required(true)
                     .value_parser(value_parser!(PathBuf))
                 )
         )
