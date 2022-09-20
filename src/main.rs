@@ -39,7 +39,11 @@ fn main() -> ExitCode {
                         .help("Enables verbose mode")
                         .short('v')
                         .takes_value(false),
-                ),
+                ).arg(
+                    arg!(<KERNEL>)
+                    .help("Path to kernel ELF file")
+                    .value_parser(value_parser!(PathBuf))
+                )
         )
         .subcommand(
             SubCommand::with_name("run")
@@ -54,16 +58,15 @@ fn main() -> ExitCode {
                     Arg::with_name("debug")
                         .help("Runs the emulator in debug mode")
                         .takes_value(false),
-                ),
-        )
-        .arg(
-        arg!(<KERNEL>)
-        .help("Path to kernel ELF file")
-        .value_parser(value_parser!(PathBuf))
+                )
+                .arg(
+                    arg!(<KERNEL>)
+                    .help("Path to kernel ELF file")
+                    .value_parser(value_parser!(PathBuf))
+                )
         );
 
     let matches = app.clone().get_matches();
-    let kernel: &PathBuf = matches.get_one("KERNEL").expect("Path to kernel missing");
 
     if matches.is_present("verbose") {
         log::set_max_level(LevelFilter::Debug);
@@ -75,7 +78,7 @@ fn main() -> ExitCode {
         }
         debug!("Args: {:?}", std::env::args());
 
-        let artifacts = build(matches, kernel);
+        let artifacts = build(matches);
 
         run::run(artifacts.config, &artifacts.iso_img, artifacts.is_test, matches.is_present("debug")).unwrap();
         return ExitCode::SUCCESS;
@@ -87,7 +90,7 @@ fn main() -> ExitCode {
         }
         debug!("Args: {:?}", std::env::args());
 
-        build(matches, kernel);
+        build(matches);
 
         return ExitCode::SUCCESS;
     }
@@ -104,7 +107,7 @@ struct BuildMetadata {
 }
 
 
-fn build(matches: &ArgMatches, kernel: &Path) -> BuildMetadata {
+fn build(matches: &ArgMatches) -> BuildMetadata {
     /*
         Where do these environment variables come from?
         https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-crates
@@ -128,7 +131,9 @@ fn build(matches: &ArgMatches, kernel: &Path) -> BuildMetadata {
     let is_verbose = matches.is_present("verbose");
     let is_release;
     let is_test;
+    let kernel: &PathBuf;
     {
+        kernel = matches.get_one("KERNEL").expect("Path to kernel missing");
         target_dir = kernel
             .parent()
             .expect("Target executable does not have a parent directory")
