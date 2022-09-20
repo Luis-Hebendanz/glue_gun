@@ -32,7 +32,7 @@ fn main() {
                 .about("Builds the ISO file")
                 .arg(
                     Arg::with_name("grub")
-                        .help("Encapsulates your kernel with grub 2")
+                        .help("Encapsulates the kernel with grub 2")
                         .takes_value(true),
                 )
                 .arg(
@@ -45,6 +45,11 @@ fn main() {
             SubCommand::with_name("run")
                 .about("Builds and runs the ISO file")
                 .arg(
+                    Arg::with_name("grub")
+                        .help("Encapsulates the kernel with grub 2")
+                        .takes_value(true),
+                )
+                .arg(
                     Arg::with_name("verbose")
                         .help("Enables verbose mode")
                         .short("v")
@@ -53,7 +58,7 @@ fn main() {
                 .arg(
                     Arg::with_name("debug")
                         .help("Runs the emulator in debug mode")
-                        .takes_value(true),
+                        .takes_value(false),
                 ),
         )
         .get_matches();
