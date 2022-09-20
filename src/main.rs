@@ -124,7 +124,14 @@ fn build(matches: &ArgMatches) -> BuildMetadata {
 
     let config;
     {
-        kernel_manifest = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("Cargo.toml");
+        let kernel_manifest_path = PathBuf::from(
+            &env::var("CARGO_MANIFEST_DIR")
+            .expect("Missing environment variable CARGO_MANIFEST_DIR")
+        );
+        if !kernel_manifest_path.is_dir(){
+            panic!("CARGO_MANIFEST_DIR does not point to a directory {}", kernel_manifest_path.to_str().unwrap());
+        }
+        kernel_manifest = kernel_manifest_path.join("Cargo.toml");
         kernel_crate = kernel_manifest
             .parent()
             .expect("Kernel directory does not have a parent dir")
@@ -140,7 +147,7 @@ fn build(matches: &ArgMatches) -> BuildMetadata {
     let is_test;
     let kernel: &PathBuf;
     {
-        kernel = matches.get_one("KERNEL").expect("Path to kernel missing");
+        kernel = matches.get_one("kernel").expect("Path to kernel missing");
         target_dir = kernel
             .parent()
             .expect("Target executable does not have a parent directory")
