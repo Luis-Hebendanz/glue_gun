@@ -57,11 +57,15 @@ fn main() -> ExitCode {
                 .arg(
                     Arg::with_name("debug")
                         .help("Runs the emulator in debug mode")
+                        .short('d')
+                        .required(false)
                         .takes_value(false),
                 )
                 .arg(
-                    arg!(<KERNEL>)
+                    Arg::with_name("kernel")
                     .help("Path to kernel ELF file")
+                    .takes_value(true)
+                    .required(true)
                     .value_parser(value_parser!(PathBuf))
                 )
         );
