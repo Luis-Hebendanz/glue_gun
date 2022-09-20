@@ -1,16 +1,17 @@
-use clap::{App, Arg, ArgMatches, SubCommand};
+use clap::{App, Arg, arg, ArgMatches, value_parser, SubCommand};
 use log::*;
 use std::{
     env,
     ffi::OsStr,
     path::{Path, PathBuf},
-    process,
+    process, 
 };
 use std::{fs::OpenOptions, io::Write};
+use std::process::ExitCode;
 
 mod config;
 mod run;
-fn main() {
+fn main() -> ExitCode {
     simple_logger::SimpleLogger::new()
         .with_level(LevelFilter::Trace)
         .with_timestamps(false)
@@ -18,41 +19,46 @@ fn main() {
         .unwrap();
     log::set_max_level(LevelFilter::Info);
 
-    let matches = App::new("Glue gun")
+    let mut app = App::new("Glue gun")
         .author("Luis Hebendanz <luis.nixos@gmail.com")
         .about("Glues together a rust bootloader and kernel to generate a bootable ISO file")
         .arg(
             Arg::with_name("verbose")
-                .short("v")
+                .short('v')
                 .help("Enables verbose mode")
                 .takes_value(false),
         )
+        .disable_help_subcommand(true)
+        .subcommand_required(true)
+        .help_expected(true)
         .subcommand(
             SubCommand::with_name("build")
                 .about("Builds the ISO file")
                 .arg(
                     Arg::with_name("grub")
                         .help("Encapsulates the kernel with grub 2")
-                        .takes_value(true),
+                        .takes_value(false),
                 )
                 .arg(
                     Arg::with_name("verbose")
                         .help("Enables verbose mode")
-                        .short("v")
+                        .short('v')
                         .takes_value(false),
                 ),
-        ).subcommand(
+        )
+        .subcommand(
             SubCommand::with_name("run")
                 .about("Builds and runs the ISO file")
                 .arg(
                     Arg::with_name("grub")
                         .help("Encapsulates the kernel with grub 2")
-                        .takes_value(true),
+                        
+                        .takes_value(false),
                 )
                 .arg(
                     Arg::with_name("verbose")
                         .help("Enables verbose mode")
-                        .short("v")
+                        .short('v')
                         .takes_value(false),
                 )
                 .arg(
@@ -61,7 +67,14 @@ fn main() {
                         .takes_value(false),
                 ),
         )
-        .get_matches();
+        .arg(
+        arg!([KERNEL])
+        .help("Path to kernel ELF file")
+        .required(true)
+        .value_parser(value_parser!(PathBuf))
+        );
+
+    let matches = app.clone().get_matches();
 
     if matches.is_present("verbose") {
         log::set_max_level(LevelFilter::Debug);
@@ -76,6 +89,7 @@ fn main() {
         let artifacts = build(matches);
 
         run::run(artifacts.config, &artifacts.iso_img, artifacts.is_test, matches.is_present("debug")).unwrap();
+        return ExitCode::SUCCESS;
     }
 
     if let Some(matches) = matches.subcommand_matches("build") {
@@ -85,7 +99,12 @@ fn main() {
         debug!("Args: {:?}", std::env::args());
 
         build(matches);
+
+        return ExitCode::SUCCESS;
     }
+
+    app.print_long_help().unwrap();
+    return ExitCode::FAILURE;
 }
 
 #[derive(Debug, Clone)]
