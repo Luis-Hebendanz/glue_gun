@@ -103,7 +103,7 @@ fn main() -> ExitCode {
     }
 
     app.print_long_help().unwrap();
-    return ExitCode::FAILURE;
+    ExitCode::FAILURE
 }
 
 #[derive(Debug, Clone)]
@@ -205,7 +205,7 @@ fn build(matches: &ArgMatches) -> BuildMetadata {
 
     let merged_exe;
     {
-        let mut full_kernel_path = kernel_crate.clone();
+        let mut full_kernel_path = kernel_crate;
         full_kernel_path.push(kernel);
         let env_vars = [("KERNEL", full_kernel_path.to_str().unwrap())];
         let features = ["binary"];
@@ -241,11 +241,11 @@ fn build(matches: &ArgMatches) -> BuildMetadata {
         glue_grub(&iso_dir, &iso_img, &merged_exe);
     }
 
-    return BuildMetadata {
+    BuildMetadata {
         config,
         iso_img,
         is_test
-    };
+    }
 }
 
 fn glue_grub(iso_dir: &PathBuf, iso_img: &PathBuf, executable: &PathBuf) {
@@ -286,7 +286,7 @@ fn glue_grub(iso_dir: &PathBuf, iso_img: &PathBuf, executable: &PathBuf) {
         .unwrap();
 
     grubcfg
-        .write(
+        .write_all(
             r#"
             set timeout=0
             set default=0
