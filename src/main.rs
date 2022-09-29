@@ -233,7 +233,7 @@ fn build(matches: &ArgMatches) -> BuildMetadata {
     let iso_img;
     {
         let kernel_name = merged_exe.file_stem().unwrap().to_str().unwrap();
-        iso_img = target_dir.join(format!("bootimage-{}.iso", kernel_name));
+        iso_img = target_dir.join(format!("{}.iso", kernel_name));
         let iso_dir = target_dir.join("isofiles");
 
         println!("Iso for {} -> {}", kernel_name, iso_img.to_str().unwrap());
