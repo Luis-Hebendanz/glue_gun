@@ -2,9 +2,6 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"path": "../.."
 		}
 	],
 	"settings": {
@@ -17,7 +14,7 @@
 		"rust-analyzer.inlayHints.typeHints.enable": false,
 		"rust-analyzer.inlayHints.lifetimeElisionHints.useParameterNames": false,
 		"rust-analyzer.inlayHints.lifetimeElisionHints.enable": "skip_trivial",
-		"rust-analyzer.inlayHints.closureReturnTypeHints.enable": "never",
+		"rust-analyzer.inlayHints.closureReturnTypeHints.enable": false,
 		"rust-analyzer.lens.references.adt.enable": false,
 		"rust-analyzer.lens.references.method.enable": false,
 		"rust-analyzer.lens.references.enumVariant.enable": false,

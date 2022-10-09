@@ -1,5 +1,9 @@
+#![allow(dead_code)]
+
 use clap::ArgMatches;
+use clap::{value_parser, Arg, Command, SubCommand};
 use log::*;
+
 use std::process::ExitCode;
 use std::{
     env,
@@ -9,11 +13,67 @@ use std::{
 };
 use std::{fs::OpenOptions, io::Write};
 
-mod run;
 mod config;
+mod run;
 
+pub fn create_cli() -> clap::App<'static> {
+    let app = Command::new("glue_gun")
+        .author("Luis Hebendanz <luis.nixos@gmail.com")
+        .about("Glues together a rust bootloader and ELF kernel to generate a bootable ISO file")
+        .arg(
+            Arg::with_name("verbose")
+                .short('v')
+                .help("Enables verbose mode")
+                .takes_value(false),
+        )
+        .disable_help_subcommand(true)
+        .subcommand_required(true)
+        .help_expected(true)
+        .subcommand(
+            SubCommand::with_name("build")
+                .about("Builds the ISO file")
+                .arg(
+                    Arg::with_name("verbose")
+                        .help("Enables verbose mode")
+                        .short('v')
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("release")
+                        .help("Building in release mode")
+                        .short('r')
+                        .takes_value(false),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("run")
+                .about("Builds and runs the ISO file")
+                .arg(
+                    Arg::with_name("verbose")
+                        .help("Enables verbose mode")
+                        .short('v')
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("debug")
+                        .help("Runs the emulator in debug mode")
+                        .short('d')
+                        .required(false)
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("kernel")
+                        .help("Path to kernel ELF file")
+                        .takes_value(true)
+                        .required(true)
+                        .value_parser(value_parser!(PathBuf)),
+                ),
+        );
 
-pub fn  parse_matches(matches: &ArgMatches) -> ExitCode {
+    app
+}
+
+pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     if matches.is_present("verbose") {
         log::set_max_level(LevelFilter::Debug);
     }
@@ -44,7 +104,7 @@ pub fn  parse_matches(matches: &ArgMatches) -> ExitCode {
             matches.is_present("debug"),
         )
         .unwrap();
-        return ExitCode::SUCCESS;
+        return Ok(());
     }
 
     if let Some(matches) = matches.subcommand_matches("build") {
@@ -62,8 +122,11 @@ pub fn  parse_matches(matches: &ArgMatches) -> ExitCode {
             })
             .expect("Failed to a cargo manifest path");
 
-        if !kernel_manifest_path.join("Cargo.toml").is_file() {
-            panic!("Couldn't find Cargo.toml in current directory");
+        {
+            let manifest_path = kernel_manifest_path.join("Cargo.toml");
+            if !manifest_path.is_file() {
+                panic!("Couldn't find Cargo.toml in {:?}", manifest_path);
+            }
         }
 
         let is_release = matches.is_present("release");
@@ -89,9 +152,9 @@ pub fn  parse_matches(matches: &ArgMatches) -> ExitCode {
             is_verbose,
         );
 
-        return ExitCode::SUCCESS;
+        return Ok(());
     }
-    ExitCode::FAILURE
+    Err(ExitCode::FAILURE)
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +379,8 @@ fn cargo_build(
 
     if let Some(config) = config {
         cmd.args(config.build_command.clone());
+    } else {
+        cmd.arg("build");
     }
 
     if let Some(features) = features {

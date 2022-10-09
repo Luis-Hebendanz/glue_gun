@@ -1,0 +1,3 @@
+[submodule "data/perf_kernel"]
+	path = resources/perf_kernel
+	url = https://github.com/Luis-Hebendanz/perf_kernel.git
