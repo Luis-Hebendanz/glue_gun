@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use clap::ArgMatches;
-use clap::{value_parser, Arg, Command, SubCommand};
+use clap::{value_parser, Arg, SubCommand};
 use log::*;
 
 use std::process::ExitCode;
@@ -17,56 +17,49 @@ mod config;
 mod run;
 
 pub fn create_cli() -> clap::App<'static> {
-    let app = Command::new("glue_gun")
+    let app = clap::Command::new("glue_gun")
         .author("Luis Hebendanz <luis.nixos@gmail.com")
         .about("Glues together a rust bootloader and ELF kernel to generate a bootable ISO file")
         .arg(
             Arg::with_name("verbose")
                 .short('v')
+                .long("verbose")
                 .help("Enables verbose mode")
+                .global(true)
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("kernel")
+                .help("Path to kernel executable")
+                .short('k')
+                .long("kernel")
+                .global(true)
+                .takes_value(true)
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::with_name("release")
+                .global(true)
+                .help("Building in release mode")
+                .long("release")
+                .short('r')
+                .conflicts_with("kernel")
                 .takes_value(false),
         )
         .disable_help_subcommand(true)
         .subcommand_required(true)
         .help_expected(true)
-        .subcommand(
-            SubCommand::with_name("build")
-                .about("Builds the ISO file")
-                .arg(
-                    Arg::with_name("verbose")
-                        .help("Enables verbose mode")
-                        .short('v')
-                        .takes_value(false),
-                )
-                .arg(
-                    Arg::with_name("release")
-                        .help("Building in release mode")
-                        .short('r')
-                        .takes_value(false),
-                ),
-        )
+        .subcommand(SubCommand::with_name("build").about("Builds the ISO file"))
         .subcommand(
             SubCommand::with_name("run")
                 .about("Builds and runs the ISO file")
                 .arg(
-                    Arg::with_name("verbose")
-                        .help("Enables verbose mode")
-                        .short('v')
-                        .takes_value(false),
-                )
-                .arg(
                     Arg::with_name("debug")
                         .help("Runs the emulator in debug mode")
                         .short('d')
+                        .long("debug")
                         .required(false)
                         .takes_value(false),
-                )
-                .arg(
-                    Arg::with_name("kernel")
-                        .help("Path to kernel ELF file")
-                        .takes_value(true)
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf)),
                 ),
         );
 
@@ -74,29 +67,52 @@ pub fn create_cli() -> clap::App<'static> {
 }
 
 pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
-    if matches.is_present("verbose") {
+    let is_release = matches.is_present("release");
+    let is_verbose = matches.is_present("verbose");
+    if is_verbose {
         log::set_max_level(LevelFilter::Debug);
     }
+    debug!("Args: {:?}", std::env::args());
+
+    let kernel_manifest_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .or_else(|_| {
+            info!("CARGO_MANIFEST_DIR not set. Using current directory");
+            std::env::current_dir()
+        })
+        .expect("Failed to a cargo manifest path");
+
+    if !kernel_manifest_path.join("Cargo.toml").is_file() {
+        panic!("Couldn't find Cargo.toml in {:?}", kernel_manifest_path);
+    }
+
+    let kernel_path: PathBuf = {
+        match matches.get_one::<PathBuf>("kernel") {
+            Some(path) => path.clone(),
+            None => {
+                let kernel_path = cargo_build(
+                    &kernel_manifest_path,
+                    None,
+                    is_release,
+                    is_verbose,
+                    None,
+                    None,
+                );
+
+                if kernel_path.len() != 1 {
+                    panic!(
+                        "Expected kernel to generate exactly one binary however {} habe been build",
+                        kernel_path.len()
+                    );
+                }
+                kernel_path.get(0).unwrap().clone()
+            }
+        }
+    };
+
+    let artifacts = build_bootloader(&kernel_path, &kernel_manifest_path, is_verbose);
 
     if let Some(matches) = matches.subcommand_matches("run") {
-        let is_verbose = matches.is_present("verbose");
-        if is_verbose {
-            log::set_max_level(LevelFilter::Debug);
-        }
-        debug!("Args: {:?}", std::env::args());
-
-        let kernel_manifest_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from)
-            .or_else(|_| {
-                info!("CARGO_MANIFEST_DIR not set using current directory");
-                std::env::current_dir()
-            })
-            .expect("Failed to a cargo manifest path");
-
-        let kernel_path: &PathBuf = matches.get_one("kernel").expect("Path to kernel missing");
-
-        let artifacts = build_bootloader(kernel_path, &kernel_manifest_path, is_verbose);
-
         run::run(
             artifacts.config,
             &artifacts.iso_img,
@@ -107,54 +123,7 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         return Ok(());
     }
 
-    if let Some(matches) = matches.subcommand_matches("build") {
-        let is_verbose = matches.is_present("verbose");
-        if is_verbose {
-            log::set_max_level(LevelFilter::Debug);
-        }
-        debug!("Args: {:?}", std::env::args());
-
-        let kernel_manifest_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from)
-            .or_else(|_| {
-                info!("CARGO_MANIFEST_DIR not set using current directory");
-                std::env::current_dir()
-            })
-            .expect("Failed to a cargo manifest path");
-
-        {
-            let manifest_path = kernel_manifest_path.join("Cargo.toml");
-            if !manifest_path.is_file() {
-                panic!("Couldn't find Cargo.toml in {:?}", manifest_path);
-            }
-        }
-
-        let is_release = matches.is_present("release");
-        let kernel_path = cargo_build(
-            &kernel_manifest_path,
-            None,
-            is_release,
-            is_verbose,
-            None,
-            None,
-        );
-
-        if kernel_path.len() != 1 {
-            panic!(
-                "Expected kernel to generate exactly one binary however {} habe been build",
-                kernel_path.len()
-            );
-        }
-
-        build_bootloader(
-            kernel_path.first().unwrap(),
-            &kernel_manifest_path,
-            is_verbose,
-        );
-
-        return Ok(());
-    }
-    Err(ExitCode::FAILURE)
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -164,40 +133,39 @@ struct BuildMetadata {
     pub iso_img: PathBuf,
 }
 
-fn build_bootloader(kernel_path: &Path, manifest_path: &Path, verbose: bool) -> BuildMetadata {
-    let kernel_manifest;
-    let kernel_crate;
-    let config;
+fn build_bootloader(
+    kernel_path: &Path,
+    kernel_manifest_dir_path: &Path,
+    verbose: bool,
+) -> BuildMetadata {
+    // Parse kernel Cargo.toml
+    let kernel_manifest_file_path;
+    let config; // parsed Cargo.toml
     {
-        if !manifest_path.is_dir() {
+        if !kernel_manifest_dir_path.is_dir() {
             panic!(
                 "Manifest path does not point to a directory {}",
-                manifest_path.to_str().unwrap()
+                kernel_manifest_dir_path.to_str().unwrap()
             );
         }
-        kernel_manifest = manifest_path.join("Cargo.toml");
-        kernel_crate = kernel_manifest
-            .parent()
-            .expect("Kernel directory does not have a parent dir")
-            .to_path_buf();
-        debug!("Manifest path: {:#?}", kernel_manifest);
+        kernel_manifest_file_path = kernel_manifest_dir_path.join("Cargo.toml");
+        debug!("Manifest path: {:#?}", kernel_manifest_file_path);
 
-        config = config::read_config(&kernel_manifest).unwrap();
+        config = config::read_config(&kernel_manifest_file_path).unwrap();
     }
 
-    let bootloader_manifest;
-    let bootloader_crate;
-    let kernel_pkg;
+    // Find directory of bootloader
+    let bootloader_crate: PathBuf;
     {
         let metadata = cargo_metadata::MetadataCommand::new()
-            .manifest_path(kernel_manifest.as_path())
+            .manifest_path(kernel_manifest_file_path.as_path())
             .exec()
             .unwrap();
 
-        kernel_pkg = metadata
+        let kernel_pkg = metadata
             .packages
             .iter()
-            .find(|p| p.manifest_path == kernel_manifest)
+            .find(|p| p.manifest_path == kernel_manifest_file_path)
             .expect("Couldn't find package with same manifest as kernel in metadata");
 
         let bootloader_name = kernel_pkg
@@ -214,16 +182,18 @@ fn build_bootloader(kernel_path: &Path, manifest_path: &Path, verbose: bool) -> 
             .find(|p| p.name == bootloader_name)
             .unwrap();
 
-        bootloader_manifest = bootloader_pkg
+        let bootloader_manifest = bootloader_pkg
             .manifest_path
             .clone()
             .to_path_buf()
             .into_std_path_buf();
-        bootloader_crate = bootloader_manifest.parent().unwrap();
+        bootloader_crate = bootloader_manifest.parent().unwrap().to_path_buf();
+        debug!("Bootloader manifest: {:?}", bootloader_manifest);
     }
-    debug!("Bootloader manifest: {:?}", bootloader_manifest);
     debug!("Bootloader crate: {:?}", bootloader_crate);
 
+    // Find out through directory names if we running a release
+    // or a test version of the binary
     let target_dir;
     let is_release;
     let is_test;
@@ -245,14 +215,31 @@ fn build_bootloader(kernel_path: &Path, manifest_path: &Path, verbose: bool) -> 
     debug!("Building in release mode? {}", is_release);
     debug!("Running a test? {}", is_test);
 
+    // Create kernel.sym file in target directory
+    {
+        let kernel_sym_name = kernel_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+            + ".sym";
+        let kernel_sym_path = target_dir.join(kernel_sym_name);
+        create_sym_file(kernel_path, &kernel_sym_path, false);
+    }
+
+    // Build bootloader crate and set the KERNEL env var
+    // to the kernel binary.
+    // The bootloader binary has in its data section the kernel.
+    // So our bootloader binary is now our "kernel"
     let merged_exe;
     {
-        let mut full_kernel_path = kernel_crate;
+        let mut full_kernel_path = kernel_manifest_dir_path.to_owned();
         full_kernel_path.push(kernel_path);
         let env_vars = [("KERNEL", full_kernel_path.to_str().unwrap())];
         let features = ["binary"];
         let exes = cargo_build(
-            bootloader_crate,
+            &bootloader_crate,
             Some(&config),
             is_release,
             verbose,
@@ -272,12 +259,20 @@ fn build_bootloader(kernel_path: &Path, manifest_path: &Path, verbose: bool) -> 
     }
     debug!("Merged executable: {:?}", merged_exe);
 
+    // Create bootloader.sym file in target directory
+    {
+        let bootloader_sym_name = "bootloader.sym";
+        let bootloader_sym_path = target_dir.join(bootloader_sym_name);
+        create_sym_file(&merged_exe, &bootloader_sym_path, true);
+    }
+
+    // Create an ISO image from our merged exe
     let iso_img;
+    let iso_dir;
     {
         let kernel_name = merged_exe.file_stem().unwrap().to_str().unwrap();
         iso_img = target_dir.join(format!("{}.iso", kernel_name));
-        let iso_dir = target_dir.join("isofiles");
-
+        iso_dir = target_dir.join("isofiles");
         println!("Iso for {} -> {}", kernel_name, iso_img.to_str().unwrap());
 
         glue_grub(&iso_dir, &iso_img, &merged_exe);
@@ -287,6 +282,58 @@ fn build_bootloader(kernel_path: &Path, manifest_path: &Path, verbose: bool) -> 
         config,
         iso_img,
         is_test,
+    }
+}
+
+fn create_sym_file(in_path: &Path, out_path: &Path, strip_in: bool) {
+    use std::process::Command;
+    // get access to llvm tools shipped in the llvm-tools-preview rustup component
+    let llvm_tools = match llvm_tools::LlvmTools::new() {
+        Ok(tools) => tools,
+        Err(llvm_tools::Error::NotFound) => {
+            eprintln!("Error: llvm-tools not found");
+            eprintln!("Maybe the rustup component `llvm-tools-preview` is missing?");
+            eprintln!("  Install it through: `rustup component add llvm-tools-preview`");
+            process::exit(1);
+        }
+        Err(err) => {
+            eprintln!("Failed to retrieve llvm-tools component: {:?}", err);
+            process::exit(1);
+        }
+    };
+
+    let objcopy = llvm_tools
+        .tool(&llvm_tools::exe("llvm-objcopy"))
+        .expect("llvm-objcopy not found in llvm-tools");
+
+    // Create separate symbol file
+    let mut cmd = Command::new(&objcopy);
+    cmd.arg("--only-keep-debug");
+    cmd.arg(in_path);
+    cmd.arg(out_path);
+    debug!("Executing:\n {:#?}", cmd);
+    let exit_status = cmd
+        .status()
+        .expect("failed to run objcopy to separate debug symbols");
+    if !exit_status.success() {
+        eprintln!("Error: Separating debug symbols failed");
+        process::exit(1);
+    }
+
+    if strip_in {
+        // Strip symbols inplace from in_path
+        let mut cmd = Command::new(&objcopy);
+        cmd.arg("--strip-debug");
+        cmd.arg(in_path);
+        cmd.arg(in_path);
+        debug!("Executing: {:#?}", cmd);
+        let exit_status = cmd
+            .status()
+            .expect("failed to run objcopy to strip debug symbols");
+        if !exit_status.success() {
+            eprintln!("Error: Stripping debug symbols failed");
+            process::exit(1);
+        }
     }
 }
 

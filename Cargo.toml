@@ -15,6 +15,7 @@ anyhow = "=1.0.39"
 json = "=0.12.4"
 thiserror = "=1.0.30"
 wait-timeout = "=0.2.0"
+llvm-tools = { version = "=0.1" }
 
 
 
