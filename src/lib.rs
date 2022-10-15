@@ -29,6 +29,13 @@ pub fn create_cli() -> clap::App<'static> {
                 .takes_value(false),
         )
         .arg(
+            Arg::with_name("vv")
+                .long("vv")
+                .help("Enables very verbose mode")
+                .global(true)
+                .takes_value(false),
+        )
+        .arg(
             Arg::with_name("kernel")
                 .help("Path to kernel executable")
                 .short('k')
@@ -69,6 +76,7 @@ pub fn create_cli() -> clap::App<'static> {
 pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     let is_release = matches.is_present("release");
     let is_verbose = matches.is_present("verbose");
+    let is_vv = matches.is_present("vv");
     if is_verbose {
         log::set_max_level(LevelFilter::Debug);
     }
@@ -94,7 +102,7 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
                     &kernel_manifest_path,
                     None,
                     is_release,
-                    is_verbose,
+                    is_vv,
                     None,
                     None,
                 );
@@ -110,7 +118,7 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         }
     };
 
-    let artifacts = build_bootloader(&kernel_path, &kernel_manifest_path, is_verbose);
+    let artifacts = build_bootloader(&kernel_path, &kernel_manifest_path, is_vv);
 
     if let Some(matches) = matches.subcommand_matches("run") {
         run::run(
