@@ -7,15 +7,19 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nix-bochsym = {
+      url = "github:luis-hebendanz/bochsym";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, utils, nix-fenix, naersk }:
+  outputs = { self, nixpkgs, nix-bochsym, utils, nix-fenix, naersk }:
     utils.lib.eachDefaultSystem (system:
       let
         overlays = [ nix-fenix.overlay ];
         pkgs = import nixpkgs { inherit system; inherit overlays; };
         naersk-lib = pkgs.callPackage naersk { };
-
+        bochsym = nix-bochsym.packages.${system}.default;
         fenix = nix-fenix.packages.${system};
         target64 = fenix.targets."x86_64-unknown-none".latest.withComponents [
           "rust-std"
@@ -33,6 +37,7 @@
         ];
 
         buildDeps = with pkgs; [
+          bochsym
           myrust
           zlib.out
           xorriso

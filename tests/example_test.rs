@@ -1,15 +1,29 @@
 use glue_gun::*;
 use std::path::PathBuf;
+use std::sync::Once;
+static START: Once = Once::new();
+//Sure to run this once
+fn setup_tests() {
+    START.call_once(|| {
+        simple_logger::SimpleLogger::new()
+            .with_level(log::LevelFilter::Trace)
+            .with_timestamps(false)
+            .init()
+            .unwrap();
+        log::set_max_level(log::LevelFilter::Debug);
+    });
+}
 
 #[test]
 fn print_help() {
+    setup_tests();
     let app = create_cli();
 
     let parse = app.try_get_matches_from(vec!["glue_gun", "--help"]);
 
     match parse {
         Err(err) => {
-            assert!(err.kind() == clap::ErrorKind::DisplayHelp)
+            assert!(err.kind() == clap::error::ErrorKind::DisplayHelp)
         }
         Ok(_) => panic!("Help does not print help"),
     };
@@ -27,6 +41,7 @@ fn test_submodule() {
 
 #[test]
 fn build_normal() {
+    setup_tests();
     let res = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
 
     let app = create_cli();
@@ -40,6 +55,7 @@ fn build_normal() {
 
 #[test]
 fn run_kernel() {
+    setup_tests();
     let res = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
 
     let app = create_cli();

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use clap::ArgMatches;
-use clap::{value_parser, Arg, SubCommand};
+use clap::{value_parser, Arg};
 use log::*;
 
 use std::process::ExitCode;
@@ -16,67 +16,58 @@ use std::{fs::OpenOptions, io::Write};
 mod config;
 mod run;
 
-pub fn create_cli() -> clap::App<'static> {
-    let app = clap::Command::new("glue_gun")
+pub fn create_cli() -> clap::Command {
+    clap::Command::new("glue_gun")
         .author("Luis Hebendanz <luis.nixos@gmail.com")
         .about("Glues together a rust bootloader and ELF kernel to generate a bootable ISO file")
         .arg(
-            Arg::with_name("verbose")
+            Arg::new("verbose")
                 .short('v')
                 .long("verbose")
                 .help("Enables verbose mode")
-                .global(true)
-                .takes_value(false),
+                .action(clap::ArgAction::Count)
+                .global(true),
         )
         .arg(
-            Arg::with_name("vv")
-                .long("vv")
-                .help("Enables very verbose mode")
-                .global(true)
-                .takes_value(false),
-        )
-        .arg(
-            Arg::with_name("kernel")
+            Arg::new("kernel")
                 .help("Path to kernel executable")
                 .short('k')
                 .long("kernel")
                 .global(true)
-                .takes_value(true)
                 .value_parser(value_parser!(PathBuf)),
         )
         .arg(
-            Arg::with_name("release")
+            Arg::new("release")
                 .global(true)
                 .help("Building in release mode")
                 .long("release")
                 .short('r')
-                .conflicts_with("kernel")
-                .takes_value(false),
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with("kernel"),
         )
         .disable_help_subcommand(true)
         .subcommand_required(true)
         .help_expected(true)
-        .subcommand(SubCommand::with_name("build").about("Builds the ISO file"))
+        .subcommand(clap::Command::new("build").about("Builds the ISO file"))
         .subcommand(
-            SubCommand::with_name("run")
+            clap::Command::new("run")
                 .about("Builds and runs the ISO file")
                 .arg(
-                    Arg::with_name("debug")
+                    Arg::new("debug")
                         .help("Runs the emulator in debug mode")
                         .short('d')
                         .long("debug")
-                        .required(false)
-                        .takes_value(false),
+                        .action(clap::ArgAction::SetTrue)
+                        .required(false),
                 ),
-        );
-
-    app
+        )
 }
 
 pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
-    let is_release = matches.is_present("release");
-    let is_verbose = matches.is_present("verbose");
-    let is_vv = matches.is_present("vv");
+    let is_release = matches.get_flag("release");
+    let is_verbose = matches.get_count("verbose") >= 1;
+    info!("verbose count: {}", matches.get_count("verbose"));
+    let is_vv = matches.get_count("verbose") > 1;
     if is_verbose {
         log::set_max_level(LevelFilter::Debug);
     }
@@ -98,14 +89,8 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         match matches.get_one::<PathBuf>("kernel") {
             Some(path) => path.clone(),
             None => {
-                let kernel_path = cargo_build(
-                    &kernel_manifest_path,
-                    None,
-                    is_release,
-                    is_vv,
-                    None,
-                    None,
-                );
+                let kernel_path =
+                    cargo_build(&kernel_manifest_path, None, is_release, is_vv, None, None);
 
                 if kernel_path.len() != 1 {
                     panic!(
@@ -125,7 +110,7 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
             artifacts.config,
             &artifacts.iso_img,
             artifacts.is_test,
-            matches.is_present("debug"),
+            matches.get_flag("debug"),
         )
         .unwrap();
         return Ok(());
@@ -163,41 +148,7 @@ fn build_bootloader(
     }
 
     // Find directory of bootloader
-    let bootloader_crate: PathBuf;
-    {
-        let metadata = cargo_metadata::MetadataCommand::new()
-            .manifest_path(kernel_manifest_file_path.as_path())
-            .exec()
-            .unwrap();
-
-        let kernel_pkg = metadata
-            .packages
-            .iter()
-            .find(|p| p.manifest_path == kernel_manifest_file_path)
-            .expect("Couldn't find package with same manifest as kernel in metadata");
-
-        let bootloader_name = kernel_pkg
-            .dependencies
-            .iter()
-            .find(|d| d.rename.as_ref().unwrap_or(&d.name) == "bootloader")
-            .expect("Couldn't find needed dependencie 'bootloader' in kernel")
-            .name
-            .clone();
-
-        let bootloader_pkg = metadata
-            .packages
-            .iter()
-            .find(|p| p.name == bootloader_name)
-            .unwrap();
-
-        let bootloader_manifest = bootloader_pkg
-            .manifest_path
-            .clone()
-            .to_path_buf()
-            .into_std_path_buf();
-        bootloader_crate = bootloader_manifest.parent().unwrap().to_path_buf();
-        debug!("Bootloader manifest: {:?}", bootloader_manifest);
-    }
+    let bootloader_crate = get_crate_path(&kernel_manifest_file_path);
     debug!("Bootloader crate: {:?}", bootloader_crate);
 
     // Find out through directory names if we running a release
@@ -224,6 +175,7 @@ fn build_bootloader(
     debug!("Running a test? {}", is_test);
 
     // Create kernel.sym file in target directory
+    let kernel_sym_path;
     {
         let kernel_sym_name = kernel_path
             .file_name()
@@ -232,7 +184,7 @@ fn build_bootloader(
             .unwrap()
             .to_owned()
             + ".sym";
-        let kernel_sym_path = target_dir.join(kernel_sym_name);
+        kernel_sym_path = target_dir.join(kernel_sym_name);
         create_sym_file(kernel_path, &kernel_sym_path, false);
     }
 
@@ -268,10 +220,21 @@ fn build_bootloader(
     debug!("Merged executable: {:?}", merged_exe);
 
     // Create bootloader.sym file in target directory
+    let bootloader_sym_path;
     {
         let bootloader_sym_name = "bootloader.sym";
-        let bootloader_sym_path = target_dir.join(bootloader_sym_name);
+        bootloader_sym_path = target_dir.join(bootloader_sym_name);
         create_sym_file(&merged_exe, &bootloader_sym_path, true);
+    }
+
+    // Create bochs symbolfile if command bochsym available
+    {
+        let bochs_sym_name = "combined.bochsym";
+        let bochs_sym_path = target_dir.join(bochs_sym_name);
+        create_bochs_symfile(
+            [bootloader_sym_path.as_path(), kernel_sym_path.as_path()],
+            &bochs_sym_path,
+        );
     }
 
     // Create an ISO image from our merged exe
@@ -281,7 +244,7 @@ fn build_bootloader(
         let kernel_name = merged_exe.file_stem().unwrap().to_str().unwrap();
         iso_img = target_dir.join(format!("{}.iso", kernel_name));
         iso_dir = target_dir.join("isofiles");
-        println!("Iso for {} -> {}", kernel_name, iso_img.to_str().unwrap());
+        info!("Created Iso image at: {}", iso_img.to_str().unwrap());
 
         glue_grub(&iso_dir, &iso_img, &merged_exe);
     }
@@ -291,6 +254,71 @@ fn build_bootloader(
         iso_img,
         is_test,
     }
+}
+
+fn get_crate_path(manifest_file_path: &Path) -> PathBuf {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(manifest_file_path)
+        .exec()
+        .unwrap();
+
+    let kernel_pkg = metadata
+        .packages
+        .iter()
+        .find(|p| p.manifest_path == manifest_file_path)
+        .expect("Couldn't find package with same manifest as kernel in metadata");
+
+    let bootloader_name = kernel_pkg
+        .dependencies
+        .iter()
+        .find(|d| d.rename.as_ref().unwrap_or(&d.name) == "bootloader")
+        .expect("Couldn't find needed dependencie 'bootloader' in kernel")
+        .name
+        .clone();
+
+    let bootloader_pkg = metadata
+        .packages
+        .iter()
+        .find(|p| p.name == bootloader_name)
+        .unwrap();
+
+    let bootloader_manifest = bootloader_pkg
+        .manifest_path
+        .clone()
+        .to_path_buf()
+        .into_std_path_buf();
+    debug!("Bootloader manifest: {:?}", bootloader_manifest);
+    bootloader_manifest.parent().unwrap().to_path_buf()
+}
+
+fn create_bochs_symfile<'a, I>(symfiles: I, out_path: &Path)
+where
+    I: IntoIterator<Item = &'a Path>,
+{
+    use std::process::Command;
+    let mut cmd = Command::new("bochsym");
+    for i in symfiles.into_iter() {
+        cmd.arg("--symfile").arg(i);
+    }
+    cmd.arg("-o");
+    cmd.arg(out_path);
+    debug!("Executing:\n {:#?}", cmd);
+    let exit_status = match cmd.status() {
+        Ok(exit_status) => exit_status,
+        Err(_) => {
+            warn!("Missing cli tool bochsym. Skipping creation of symbol file for bochs emulator");
+            return;
+        }
+    };
+    if !exit_status.success() {
+        eprintln!("Error: bochsym exited with nonzero");
+        process::exit(1);
+    }
+
+    info!(
+        "Created bochs symbol file: {}",
+        out_path.file_name().unwrap().to_str().unwrap()
+    );
 }
 
 fn create_sym_file(in_path: &Path, out_path: &Path, strip_in: bool) {
@@ -328,6 +356,10 @@ fn create_sym_file(in_path: &Path, out_path: &Path, strip_in: bool) {
         process::exit(1);
     }
 
+    info!(
+        "Created symbol file: {}",
+        out_path.file_name().unwrap().to_str().unwrap()
+    );
     if strip_in {
         // Strip symbols inplace from in_path
         let mut cmd = Command::new(&objcopy);
@@ -342,6 +374,7 @@ fn create_sym_file(in_path: &Path, out_path: &Path, strip_in: bool) {
             eprintln!("Error: Stripping debug symbols failed");
             process::exit(1);
         }
+        debug!("Stripped symbols from {}", in_path.display());
     }
 }
 
@@ -420,8 +453,11 @@ fn cargo_build(
     features: Option<&[&str]>,
     env: Option<&[(&str, &str)]>,
 ) -> Vec<PathBuf> {
+    info!(
+        "Building crate {}",
+        target_crate.file_name().unwrap().to_str().unwrap()
+    );
     let mut executables = Vec::new();
-
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
     let mut cmd = process::Command::new(&cargo);
     cmd.current_dir(target_crate);
