@@ -5,6 +5,7 @@ use clap::{value_parser, Arg};
 use log::*;
 
 use std::process::ExitCode;
+
 use std::{
     env,
     ffi::OsStr,
@@ -20,6 +21,7 @@ pub fn create_cli() -> clap::Command {
     clap::Command::new("glue_gun")
         .author("Luis Hebendanz <luis.nixos@gmail.com")
         .about("Glues together a rust bootloader and ELF kernel to generate a bootable ISO file")
+        .alias("gg")
         .arg(
             Arg::new("verbose")
                 .short('v')
@@ -61,19 +63,31 @@ pub fn create_cli() -> clap::Command {
                         .required(false),
                 ),
         )
+        .subcommand(
+            clap::Command::new("clean")
+                .about("Deletes build artifacts of the kernel and bootloader crate")
+                .arg(
+                    Arg::new("all")
+                        .help("Deletes all artifacts")
+                        .short('a')
+                        .long("all")
+                        .action(clap::ArgAction::SetTrue)
+                        .required(false),
+                ),
+        )
 }
 
 pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     let is_release = matches.get_flag("release");
     let is_verbose = matches.get_count("verbose") >= 1;
-    info!("verbose count: {}", matches.get_count("verbose"));
     let is_vv = matches.get_count("verbose") > 1;
+
     if is_verbose {
         log::set_max_level(LevelFilter::Debug);
     }
     debug!("Args: {:?}", std::env::args());
 
-    let kernel_manifest_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
+    let kernel_manifest_dir_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
         .or_else(|_| {
             info!("CARGO_MANIFEST_DIR not set. Using current directory");
@@ -81,16 +95,30 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         })
         .expect("Failed to a cargo manifest path");
 
-    if !kernel_manifest_path.join("Cargo.toml").is_file() {
-        panic!("Couldn't find Cargo.toml in {:?}", kernel_manifest_path);
+    debug!(
+        "Kernel manifest dir path: {}",
+        kernel_manifest_dir_path.display()
+    );
+
+    if let Some(matches) = matches.subcommand_matches("clean") {
+        let is_all = matches.get_flag("all");
+        glue_gun_clean(&kernel_manifest_dir_path, is_all, is_release, is_vv);
+        return Ok(());
     }
 
+    // If subcommand 'build' or 'run'
     let kernel_path: PathBuf = {
         match matches.get_one::<PathBuf>("kernel") {
             Some(path) => path.clone(),
             None => {
-                let kernel_path =
-                    cargo_build(&kernel_manifest_path, None, is_release, is_vv, None, None);
+                let kernel_path = cargo_build(
+                    &kernel_manifest_dir_path,
+                    None,
+                    is_release,
+                    is_vv,
+                    None,
+                    None,
+                );
 
                 if kernel_path.len() != 1 {
                     panic!(
@@ -103,7 +131,7 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         }
     };
 
-    let artifacts = build_bootloader(&kernel_path, &kernel_manifest_path, is_vv);
+    let artifacts = build_bootloader(&kernel_path, &kernel_manifest_dir_path, is_vv);
 
     if let Some(matches) = matches.subcommand_matches("run") {
         run::run(
@@ -117,6 +145,89 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     }
 
     Ok(())
+}
+
+pub fn glue_gun_clean(
+    kernel_manifest_dir_path: &PathBuf,
+    clean_all: bool,
+    is_release: bool,
+    is_vv: bool,
+) {
+    // Clean kernel crate
+    let kernel_crate_names: Option<Vec<String>> =
+        (!clean_all).then(|| get_crate_names(&kernel_manifest_dir_path.join("Cargo.toml")));
+    debug!("Kernel crate: {:?}", kernel_manifest_dir_path);
+    debug!("Kernel crate names: {:?}", kernel_crate_names);
+    cargo_clean(
+        kernel_manifest_dir_path,
+        kernel_crate_names,
+        is_release,
+        is_vv,
+        None,
+    );
+
+    // Clean bootloader crate
+    let bootloader_crate_path =
+        get_bootloader_crate_path(&kernel_manifest_dir_path.join("Cargo.toml"));
+    let bootloader_crate_names =
+        (!clean_all).then(|| get_crate_names(&bootloader_crate_path.join("Cargo.toml")));
+    debug!("Bootloader crate: {:?}", bootloader_crate_path);
+    debug!("Bootloader crate names: {:?}", bootloader_crate_names);
+    cargo_clean(
+        &bootloader_crate_path,
+        bootloader_crate_names,
+        is_release,
+        is_vv,
+        None,
+    );
+}
+
+fn cargo_clean(
+    target_crate: &Path,
+    dep_names: Option<Vec<String>>,
+    is_release: bool,
+    is_verbose: bool,
+    env: Option<&[(&str, &str)]>,
+) {
+    info!(
+        "Cleaning crate {}",
+        target_crate.file_name().unwrap().to_str().unwrap()
+    );
+
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let mut cmd = process::Command::new(&cargo);
+    cmd.current_dir(target_crate);
+    if let Some(env) = env {
+        for (key, val) in env {
+            cmd.env(key, val);
+        }
+        debug!("Env vars: {:?}", env);
+    }
+    cmd.arg("clean");
+
+    if let Some(dep_names) = dep_names {
+        for dep_name in dep_names {
+            cmd.arg("--package");
+            cmd.arg(dep_name);
+        }
+    }
+
+    if is_verbose {
+        cmd.arg("-vv");
+    }
+
+    if is_release {
+        cmd.arg("--release");
+    }
+
+    cmd.stdout(process::Stdio::inherit());
+    cmd.stderr(process::Stdio::inherit());
+    debug!("Running command: {:#?}", cmd);
+
+    let output = cmd.output().expect("Failed to clean crate");
+    if !output.status.success() {
+        panic!("Failed to clean crate");
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,7 +259,7 @@ fn build_bootloader(
     }
 
     // Find directory of bootloader
-    let bootloader_crate = get_crate_path(&kernel_manifest_file_path);
+    let bootloader_crate = get_bootloader_crate_path(&kernel_manifest_file_path);
     debug!("Bootloader crate: {:?}", bootloader_crate);
 
     // Find out through directory names if we running a release
@@ -256,7 +367,25 @@ fn build_bootloader(
     }
 }
 
-fn get_crate_path(manifest_file_path: &Path) -> PathBuf {
+fn get_crate_names(manifest_file_path: &Path) -> Vec<String> {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(manifest_file_path)
+        .exec()
+        .unwrap();
+    metadata
+        .workspace_members
+        .into_iter()
+        .map(|x| {
+            x.to_string()
+                .split_ascii_whitespace()
+                .next()
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
+fn get_bootloader_crate_path(manifest_file_path: &Path) -> PathBuf {
     let metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path(manifest_file_path)
         .exec()

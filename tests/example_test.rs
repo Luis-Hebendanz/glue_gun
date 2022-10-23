@@ -66,3 +66,17 @@ fn run_kernel() {
     std::env::set_var("CARGO_MANIFEST_DIR", res.join("perf_kernel/kernel"));
     glue_gun::parse_matches(&matches).expect("Failed to execute test");
 }
+
+#[test]
+fn clean() {
+    setup_tests();
+    let res = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+
+    let app = create_cli();
+    let cmd = vec!["glue_gun", "clean"];
+
+    let matches = app.try_get_matches_from(cmd).unwrap();
+
+    std::env::set_var("CARGO_MANIFEST_DIR", res.join("perf_kernel/kernel"));
+    glue_gun::parse_matches(&matches).expect("Failed to execute test");
+}
