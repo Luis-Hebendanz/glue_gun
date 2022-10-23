@@ -48,7 +48,12 @@
         ]);
       in
       rec {
-        packages.default = naersk-lib.buildPackage ./.;
+        packages.default = naersk-lib.buildPackage {
+          src = ./.;
+          postInstall = ''
+            ln -s $out/bin/glue_gun $out/bin/gg
+          '';
+        };
 
         defaultPackage = packages.default;
 
