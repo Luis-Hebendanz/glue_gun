@@ -90,7 +90,7 @@ pub fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     let kernel_manifest_dir_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
         .map(PathBuf::from)
         .or_else(|_| {
-            info!("CARGO_MANIFEST_DIR not set. Using current directory");
+            debug!("CARGO_MANIFEST_DIR not set. Using current directory");
             std::env::current_dir()
         })
         .expect("Failed to a cargo manifest path");
