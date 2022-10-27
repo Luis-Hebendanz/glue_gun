@@ -8,6 +8,8 @@ use std::{
 };
 use std::{fs::OpenOptions, io::Write};
 
+use crate::{CliOptions, Manifests};
+
 #[derive(Debug, Clone)]
 pub struct BuildMetadata {
     pub config: crate::config::Config,
@@ -15,15 +17,13 @@ pub struct BuildMetadata {
     pub iso_img: PathBuf,
 }
 
-pub fn build_bootloader(
-    kernel_path: &Path,
-    kernel_crate_path: &Path,
-    bootloader_crate_path: &Path,
-    verbose: bool,
+pub fn glue_gun_all(
+    kernel_exec_path: &Path,
+    manifests: &Manifests,
+    cli_options: CliOptions,
 ) -> BuildMetadata {
     // Parse kernel Cargo.toml
-    let kernel_manifest_file_path = kernel_crate_path.join("Cargo.toml");
-    let config = crate::config::read_config(&kernel_manifest_file_path).unwrap(); // parsed Cargo.toml
+    let config = crate::config::read_config(&manifests.kernel.cargo_toml).unwrap(); // parsed Cargo.toml
 
     // Find out through directory names if we running a release
     // or a test version of the binary
@@ -31,7 +31,7 @@ pub fn build_bootloader(
     let is_release;
     let is_test;
     {
-        target_dir = kernel_path
+        target_dir = kernel_exec_path
             .parent()
             .expect("Target executable does not have a parent directory")
             .to_path_buf();
@@ -51,7 +51,7 @@ pub fn build_bootloader(
     // Create kernel.sym file in target directory
     let kernel_sym_path;
     {
-        let kernel_sym_name = kernel_path
+        let kernel_sym_name = kernel_exec_path
             .file_name()
             .unwrap()
             .to_str()
@@ -59,7 +59,7 @@ pub fn build_bootloader(
             .to_owned()
             + ".sym";
         kernel_sym_path = target_dir.join(kernel_sym_name);
-        crate::sym::create_sym_file(kernel_path, &kernel_sym_path, false);
+        crate::sym::create_sym_file(kernel_exec_path, &kernel_sym_path, false);
     }
 
     // Build bootloader crate and set the KERNEL env var
@@ -68,15 +68,15 @@ pub fn build_bootloader(
     // So our bootloader binary is now our "kernel"
     let merged_exe;
     {
-        let mut full_kernel_path = kernel_crate_path.to_owned();
-        full_kernel_path.push(kernel_path);
+        let mut full_kernel_path = manifests.kernel.crate_path.to_owned();
+        full_kernel_path.push(kernel_exec_path);
         let env_vars = [("KERNEL", full_kernel_path.to_str().unwrap())];
         let features = ["binary"];
         let exes = cargo_build(
-            bootloader_crate_path,
+            &manifests.bootloader.crate_path,
             Some(&config),
             is_release,
-            verbose,
+            cli_options.is_very_verbose,
             Some(&features),
             Some(&env_vars),
         );
@@ -86,7 +86,10 @@ pub fn build_bootloader(
         }
 
         let exe = &exes[0];
-        let dst = exe.parent().unwrap().join(kernel_path.file_name().unwrap());
+        let dst = exe
+            .parent()
+            .unwrap()
+            .join(kernel_exec_path.file_name().unwrap());
         std::fs::rename(exe, &dst).expect("Failed to rename bootloader executable");
 
         merged_exe = dst;

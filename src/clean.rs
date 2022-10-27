@@ -1,46 +1,36 @@
 use log::*;
 
-use std::{
-    env,
-    path::{Path, PathBuf},
-    process,
-};
+use std::{env, path::Path, process};
 
-pub fn glue_gun_clean(
-    kernel_manifest_dir_path: &PathBuf,
-    bootloader_crate_path: &Path,
-    clean_all: bool,
-    is_release: bool,
-    is_vv: bool,
-) {
+use crate::CliOptions;
+
+pub fn glue_gun_clean(manifests: &crate::Manifests, cli_options: CliOptions, clean_all: bool) {
     // Clean kernel crate
-    let kernel_crate_names: Option<Vec<String>> =
-        (!clean_all).then(|| crate::get_crate_names(&kernel_manifest_dir_path.join("Cargo.toml")));
-    debug!("Kernel crate: {:?}", kernel_manifest_dir_path);
-    debug!("Kernel crate names: {:?}", kernel_crate_names);
+    let kernel_crate_name: Option<Vec<String>> =
+        (!clean_all).then(|| vec![manifests.kernel.crate_name.clone()]);
+
     cargo_clean(
-        kernel_manifest_dir_path,
-        kernel_crate_names,
-        is_release,
-        is_vv,
+        &manifests.kernel.crate_path,
+        kernel_crate_name,
+        cli_options.is_release,
+        cli_options.is_very_verbose,
         None,
     );
 
     // Clean bootloader crate
     let bootloader_crate_names =
-        (!clean_all).then(|| crate::get_crate_names(&bootloader_crate_path.join("Cargo.toml")));
-    debug!("Bootloader crate: {:?}", bootloader_crate_path);
-    debug!("Bootloader crate names: {:?}", bootloader_crate_names);
+        (!clean_all).then(|| vec![manifests.bootloader.crate_name.clone()]);
+
     cargo_clean(
-        bootloader_crate_path,
+        &manifests.bootloader.crate_path,
         bootloader_crate_names,
-        is_release,
-        is_vv,
+        cli_options.is_release,
+        cli_options.is_very_verbose,
         None,
     );
 }
 
-fn cargo_clean(
+pub fn cargo_clean(
     target_crate: &Path,
     dep_names: Option<Vec<String>>,
     is_release: bool,

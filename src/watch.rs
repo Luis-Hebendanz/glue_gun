@@ -1,8 +1,8 @@
 use log::*;
 
-use std::path::Path;
+use crate::Manifests;
 
-pub async fn glue_gun_watch(kernel_manifest_dir_path: &Path, bootloader_crate_path: &Path) {
+pub async fn glue_gun_watch(manifests: &Manifests) {
     use watchexec::{
         action::{Action, Outcome},
         config::{InitConfig, RuntimeConfig},
@@ -16,7 +16,10 @@ pub async fn glue_gun_watch(kernel_manifest_dir_path: &Path, bootloader_crate_pa
     init.on_error(PrintDebug(std::io::stderr()));
 
     let mut runtime = RuntimeConfig::default();
-    runtime.pathset([bootloader_crate_path, kernel_manifest_dir_path]);
+    runtime.pathset([
+        manifests.bootloader.crate_path.clone(),
+        manifests.kernel.crate_path.clone(),
+    ]);
 
     let we = Watchexec::new(init, runtime.clone()).unwrap();
 
@@ -35,6 +38,7 @@ pub async fn glue_gun_watch(kernel_manifest_dir_path: &Path, bootloader_crate_pa
             }
         }
 
+        //TODO: Put build code here
         action.outcome(Outcome::DoNothing);
         Ok::<(), RuntimeError>(())
     });

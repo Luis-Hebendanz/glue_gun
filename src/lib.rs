@@ -81,12 +81,20 @@ pub fn create_cli() -> clap::Command {
         )
 }
 
-pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
-    let is_release = matches.get_flag("release");
-    let is_verbose = matches.get_count("verbose") >= 1;
-    let is_vv = matches.get_count("verbose") > 1;
+pub struct CliOptions {
+    is_release: bool,
+    is_verbose: bool,
+    is_very_verbose: bool,
+}
 
-    if is_verbose {
+pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
+    let cli_options = CliOptions {
+        is_release: matches.get_flag("release"),
+        is_verbose: matches.get_count("verbose") >= 1,
+        is_very_verbose: matches.get_count("verbose") > 1,
+    };
+
+    if cli_options.is_verbose {
         log::set_max_level(LevelFilter::Debug);
     }
     debug!("Args: {:?}", std::env::args());
@@ -95,35 +103,25 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
 
     if let Some(matches) = matches.subcommand_matches("clean") {
         let is_all = matches.get_flag("all");
-        crate::clean::glue_gun_clean(
-            &manifests.kernel.crate_path,
-            &manifests.bootloader.crate_path,
-            is_all,
-            is_release,
-            is_vv,
-        );
+        crate::clean::glue_gun_clean(&manifests, cli_options, is_all);
         return Ok(());
     }
 
     if let Some(_matches) = matches.subcommand_matches("watch") {
-        crate::watch::glue_gun_watch(
-            &manifests.kernel.crate_path,
-            &manifests.bootloader.crate_path,
-        )
-        .await;
+        crate::watch::glue_gun_watch(&manifests).await;
         return Ok(());
     }
 
     // If subcommand 'build' or 'run'
-    let kernel_path: PathBuf = {
+    let kernel_exec_path: PathBuf = {
         match matches.get_one::<PathBuf>("kernel") {
             Some(path) => path.clone(),
             None => {
                 let kernel_path = crate::build::cargo_build(
                     &manifests.kernel.crate_path,
                     None,
-                    is_release,
-                    is_vv,
+                    cli_options.is_release,
+                    cli_options.is_very_verbose,
                     None,
                     None,
                 );
@@ -139,12 +137,7 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         }
     };
 
-    let artifacts = crate::build::build_bootloader(
-        &kernel_path,
-        &manifests.kernel.crate_path,
-        &manifests.bootloader.crate_path,
-        is_vv,
-    );
+    let artifacts = crate::build::glue_gun_all(&kernel_exec_path, &manifests, cli_options);
 
     if let Some(matches) = matches.subcommand_matches("run") {
         run::run(
