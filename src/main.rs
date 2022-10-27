@@ -4,7 +4,9 @@ use log::*;
 
 mod config;
 mod run;
-fn main() {
+
+#[tokio::main]
+async fn main() {
     simple_logger::SimpleLogger::new()
         .with_level(LevelFilter::Trace)
         .with_timestamps(false)
@@ -14,5 +16,5 @@ fn main() {
 
     let app = glue_gun::create_cli();
     let matches = app.get_matches();
-    glue_gun::parse_matches(&matches).unwrap();
+    glue_gun::parse_matches(&matches).await.unwrap();
 }
