@@ -20,7 +20,7 @@ pub struct BuildMetadata {
 pub fn glue_gun_build(
     kernel_exec_path: &Path,
     manifests: &Manifests,
-    cli_options: CliOptions,
+    cli_options: &CliOptions,
 ) -> BuildMetadata {
     // Parse kernel Cargo.toml
     let config = crate::config::read_config(&manifests.kernel.cargo_toml).unwrap(); // parsed Cargo.toml

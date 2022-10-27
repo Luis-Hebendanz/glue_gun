@@ -65,6 +65,7 @@
           buildInputs = buildDeps;
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
           shellHook = ''
+          unalias gg
           export PATH=$PATH:~/.cargo/bin
           '';
         };

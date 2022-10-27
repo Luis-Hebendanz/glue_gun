@@ -81,6 +81,7 @@ pub fn create_cli() -> clap::Command {
         )
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct CliOptions {
     is_release: bool,
     is_verbose: bool,
@@ -104,11 +105,6 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     if let Some(matches) = matches.subcommand_matches("clean") {
         let is_all = matches.get_flag("all");
         crate::clean::glue_gun_clean(&manifests, cli_options, is_all);
-        return Ok(());
-    }
-
-    if let Some(_matches) = matches.subcommand_matches("watch") {
-        crate::watch::glue_gun_watch(&manifests, cli_options).await;
         return Ok(());
     }
 
@@ -137,7 +133,12 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         }
     };
 
-    let artifacts = crate::build::glue_gun_build(&kernel_exec_path, &manifests, cli_options);
+    if let Some(_matches) = matches.subcommand_matches("watch") {
+        crate::watch::glue_gun_watch(&kernel_exec_path, &manifests, &cli_options).await;
+        return Ok(());
+    }
+
+    let artifacts = crate::build::glue_gun_build(&kernel_exec_path, &manifests, &cli_options);
 
     if let Some(matches) = matches.subcommand_matches("run") {
         run::glue_gun_run(

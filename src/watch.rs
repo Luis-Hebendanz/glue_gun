@@ -1,8 +1,14 @@
+use std::path::Path;
+
 use log::*;
 
-use crate::{Manifests, CliOptions};
+use crate::{CliOptions, Manifests};
 
-pub async fn glue_gun_watch(manifests: &Manifests, _cli_options: CliOptions) {
+pub async fn glue_gun_watch<'a>(
+    kernel_exec_path: &'a Path,
+    manifests: &'a Manifests,
+    cli_options: &'a CliOptions,
+) {
     use watchexec::{
         action::{Action, Outcome},
         config::{InitConfig, RuntimeConfig},
@@ -23,7 +29,10 @@ pub async fn glue_gun_watch(manifests: &Manifests, _cli_options: CliOptions) {
 
     let we = Watchexec::new(init, runtime.clone()).unwrap();
 
-    runtime.on_action(move |action: Action| async move {
+    runtime.on_action(move |action: Action| {
+        let fut = async { Ok::<(), RuntimeError>(()) };
+
+
         for event in action.events.iter() {
             info!("event: {:?}", event);
 
@@ -34,13 +43,18 @@ pub async fn glue_gun_watch(manifests: &Manifests, _cli_options: CliOptions) {
                 )
             }) {
                 action.outcome(Outcome::both(Outcome::Stop, Outcome::Exit));
-                return Ok::<(), RuntimeError>(());
+                return fut;
             }
         }
 
         //TODO: Put build code here
-        action.outcome(Outcome::DoNothing);
-        Ok::<(), RuntimeError>(())
+        // let artifacts = crate::build::glue_gun_build(
+        //     &kernel_exec_path.clone(),
+        //     &manifests.clone(),
+        //     &cli_options.clone(),
+        // );
+        //action.outcome(Outcome::DoNothing);
+        fut
     });
 
     we.reconfigure(runtime).unwrap();
