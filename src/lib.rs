@@ -108,7 +108,7 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     }
 
     if let Some(_matches) = matches.subcommand_matches("watch") {
-        crate::watch::glue_gun_watch(&manifests).await;
+        crate::watch::glue_gun_watch(&manifests, cli_options).await;
         return Ok(());
     }
 
@@ -137,10 +137,10 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
         }
     };
 
-    let artifacts = crate::build::glue_gun_all(&kernel_exec_path, &manifests, cli_options);
+    let artifacts = crate::build::glue_gun_build(&kernel_exec_path, &manifests, cli_options);
 
     if let Some(matches) = matches.subcommand_matches("run") {
-        run::run(
+        run::glue_gun_run(
             artifacts.config,
             &artifacts.iso_img,
             artifacts.is_test,

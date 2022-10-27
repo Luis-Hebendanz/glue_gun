@@ -1,8 +1,8 @@
 use log::*;
 
-use crate::Manifests;
+use crate::{Manifests, CliOptions};
 
-pub async fn glue_gun_watch(manifests: &Manifests) {
+pub async fn glue_gun_watch(manifests: &Manifests, _cli_options: CliOptions) {
     use watchexec::{
         action::{Action, Outcome},
         config::{InitConfig, RuntimeConfig},

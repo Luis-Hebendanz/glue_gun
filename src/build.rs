@@ -17,7 +17,7 @@ pub struct BuildMetadata {
     pub iso_img: PathBuf,
 }
 
-pub fn glue_gun_all(
+pub fn glue_gun_build(
     kernel_exec_path: &Path,
     manifests: &Manifests,
     cli_options: CliOptions,
