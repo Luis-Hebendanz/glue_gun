@@ -8,14 +8,13 @@ use std::{
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Dependency {
     pub name: String,
-    pub source: String,
     pub path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
 pub struct CrateMetadata {
-    metadata: Metadata,
-    cargo_toml: PathBuf,
+    pub metadata: Metadata,
+    pub cargo_toml: PathBuf,
 }
 
 impl CrateMetadata {
@@ -147,7 +146,6 @@ fn recursive_local_dependencies(cargo_toml: &Path) -> BTreeSet<Dependency> {
             let cargo_toml = PathBuf::from(dep_path).join("Cargo.toml");
             let mydep = Dependency {
                 path: PathBuf::from(dep_path),
-                source: dep.source.as_ref().unwrap().to_string(),
                 name: dep.name.to_string(),
             };
             local_deps.insert(mydep);

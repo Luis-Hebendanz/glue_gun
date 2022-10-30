@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{run, CliOptions, Manifests};
-use ignore::WalkBuilder;
+
 use log::*;
 use std::collections::BTreeSet;
 use watchexec::{
@@ -13,65 +13,43 @@ use watchexec::{
     Watchexec,
 };
 
-pub fn compute_whitelist<I>(crates: I) -> BTreeSet<PathBuf>
-where
-    I: IntoIterator<Item = std::path::PathBuf>,
-{
-    let watch_files: std::sync::Mutex<BTreeSet<PathBuf>> = std::sync::Mutex::new(BTreeSet::new());
-    for cr in crates {
-        WalkBuilder::new(cr).build_parallel().run(|| {
-            Box::new(
-                |result: Result<ignore::DirEntry, ignore::Error>| match result {
-                    Ok(entry) => {
-                        debug!("{}", entry.path().display());
-                        let mut watch_files = watch_files.lock().expect("Failed to get lock");
-                        watch_files.insert(entry.into_path());
-                        ignore::WalkState::Continue
-                    }
-                    Err(err) => {
-                        error!("{}", err);
-                        ignore::WalkState::Skip
-                    }
-                },
-            )
-        });
-    }
-    let watch_files = watch_files.lock().expect("Failed to get lock");
-    watch_files.iter().map(|x| x.to_path_buf()).collect()
-}
-
 #[derive(Debug, Default)]
-struct MyFilter {
-    ignore_files: BTreeSet<PathBuf>,
-}
-use std::sync::Arc;
-use watchexec::filter::Filterer;
-
-impl MyFilter {
-    pub fn new(ignore_files: BTreeSet<PathBuf>) -> Self {
-        Self { ignore_files }
-    }
-
-    pub fn add_ignored(&mut self, path: PathBuf) {
-        self.ignore_files.insert(path);
-    }
+struct Watchlist {
+    watch: BTreeSet<PathBuf>,
 }
 
-impl Filterer for MyFilter {
-    fn check_event(
-        &self,
-        event: &watchexec::event::Event,
-        _priority: watchexec::event::Priority,
-    ) -> Result<bool, RuntimeError> {
-        for (p, _) in event.paths() {
-            for ignore_path in self.ignore_files.iter() {
-                if p.starts_with(ignore_path) {
-                    return Ok(false);
-                }
-            }
+impl Watchlist {
+    pub fn add(&mut self, root: &Path, str: &str) {
+        let a = root.join(str);
+        if a.exists() {
+            self.watch.insert(a);
         }
+    }
 
-        Ok(true)
+    pub fn get(&self) -> &BTreeSet<PathBuf> {
+        &self.watch
+    }
+
+    pub fn append<I>(&mut self, data: I)
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
+        for crate_root in data {
+            self.add_default(&crate_root);
+        }
+    }
+    pub fn add_default(&mut self, root: &Path) {
+        self.add(root, "Cargo.toml");
+        self.add(root, "build.rs");
+        self.add(root, "src");
+        self.add(root, "tests");
+        self.add(root, "Cargo.lock");
+    }
+
+    pub fn new() -> Self {
+        Self {
+            watch: BTreeSet::new(),
+        }
     }
 }
 
@@ -86,25 +64,37 @@ pub async fn glue_gun_watch(
     init.on_error(PrintDebug(std::io::stderr()));
     let mut runtime = RuntimeConfig::default();
 
-    let watch_dirs = [
-        manifests.bootloader.crate_path.clone(),
-        manifests.kernel.crate_path.clone(),
-    ];
+    let mut crates_to_watch: BTreeSet<PathBuf> = BTreeSet::new();
+    crates_to_watch.insert(manifests.bootloader.crate_path.clone());
+    crates_to_watch.insert(manifests.kernel.crate_path.clone());
 
-    // Compute a file whitelist, adhering to the .gitignore file
-    let mut file_whitelist = compute_whitelist(watch_dirs.clone());
-    for x in file_whitelist.clone() {
-        println!("{}", x.display());
+    let mut boot_deps: BTreeSet<PathBuf> = manifests
+        .bootloader
+        .meta
+        .get_recurisve_local_dependencies()
+        .iter()
+        .map(|x| x.path.clone())
+        .collect();
+    crates_to_watch.append(&mut boot_deps);
+
+    let mut kernel_deps: BTreeSet<PathBuf> = manifests
+        .kernel
+        .meta
+        .get_recurisve_local_dependencies()
+        .iter()
+        .map(|x| x.path.clone())
+        .collect();
+    crates_to_watch.append(&mut kernel_deps);
+
+    for cr in &crates_to_watch {
+        println!("{}", cr.display());
     }
 
-    // Set watch command to notify on these directories
-    runtime.pathset(watch_dirs.clone());
+    let mut watchlist = Watchlist::new();
+    watchlist.append(crates_to_watch);
 
-    // Add event filter
-    let mut myfilter = MyFilter::default();
-    myfilter.add_ignored(manifests.bootloader.target_dir.clone());
-    myfilter.add_ignored(manifests.kernel.target_dir.clone());
-    runtime.filterer(Arc::new(myfilter));
+    // Set watch command to notify on these directories
+    runtime.pathset(watchlist.get());
 
     // Init
     let we = Watchexec::new(init, runtime.clone()).unwrap();
@@ -128,10 +118,6 @@ pub async fn glue_gun_watch(
                 return fut;
             }
 
-            let mut is_whitelisted = event
-                .paths()
-                .any(|p| file_whitelist.contains(&p.0.to_path_buf()));
-
             // Iterator over file event kind (created, modified, etc)
             let event_kinds = event.tags.iter().filter_map(|p| match p {
                 watchexec::event::Tag::FileEventKind(event_kind) => Some(event_kind),
@@ -139,17 +125,9 @@ pub async fn glue_gun_watch(
             });
 
             for ek in event_kinds {
-                // // If file has been created recompute file whitelist
-                // if e.is_create() {
-                //     file_whitelist = compute_whitelist(watch_dirs.clone());
-                //     is_whitelisted = event
-                //         .paths()
-                //         .any(|p| file_whitelist.contains(&p.0.to_path_buf()));
-                // }
-
                 // If file has been modified or removed and is in whitelist
                 // rebuild and return.
-                if (ek.is_modify() || ek.is_remove()) && is_whitelisted {
+                if ek.is_modify() || ek.is_remove() || ek.is_create() {
                     info!("file changed: {:?}", event);
 
                     let _artifacts =

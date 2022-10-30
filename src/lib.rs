@@ -200,6 +200,13 @@ fn get_crate_paths() -> Manifests {
                 kernel_names.len()
             );
         }
+
+        if !kernel_meta.metadata.workspace_metadata.is_null() {
+            panic!(
+                "Workspace crates are not supported: {}",
+                kernel_cargo_toml.display()
+            );
+        }
         Manifest {
             crate_name: kernel_names.first().unwrap().to_string(),
             crate_path: kernel_crate_path,
@@ -221,6 +228,12 @@ fn get_crate_paths() -> Manifests {
             panic!(
                 "Expected crate to generate exactly one binary, generates however {}",
                 boot_names.len()
+            );
+        }
+        if !boot_meta.metadata.workspace_metadata.is_null() {
+            panic!(
+                "Workspace crates are not supported: {}",
+                boot_cargo_toml.display()
             );
         }
         Manifest {
