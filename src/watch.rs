@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{run, CliOptions, Manifests};
+use crate::{CliOptions, Manifests};
 
 use log::*;
 use std::collections::BTreeSet;
