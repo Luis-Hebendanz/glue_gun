@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-simple_logger = "=1.13.0"
+simple_logger = "4.0.0"
 log = "0.4.14"
 toml = "0.5.8"
-cargo_metadata = "0.14.1"
+cargo_metadata = "0.15.1"
 clap = "4.0.18"
 anyhow = "1.0.39"
 json = "0.12.4"
@@ -17,7 +17,9 @@ thiserror = "1.0.37"
 wait-timeout = "0.2.0"
 llvm-tools = { version = "0.1" }
 watchexec = "2.0.2"
-tokio = "1.21.2"
+tokio = { version = "1.21.2", features = ["full"] }
+ignore = "0.4.18"
+command-group = "1.0.8"
 
 [features]
 binary = []
