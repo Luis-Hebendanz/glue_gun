@@ -6,14 +6,12 @@ use log::*;
 
 use std::process::ExitCode;
 
-use std::{
-    env,
-    path::{Path, PathBuf},
-};
+use std::{env, path::PathBuf};
 
 mod build;
 mod clean;
 mod config;
+mod metadata;
 mod run;
 mod sym;
 mod watch;
@@ -134,7 +132,7 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     };
 
     if let Some(_matches) = matches.subcommand_matches("watch") {
-        crate::watch::glue_gun_watch(&kernel_exec_path, &manifests, &cli_options).await;
+        crate::watch::glue_gun_watch(kernel_exec_path, manifests, cli_options).await;
         return Ok(());
     }
 
@@ -154,10 +152,14 @@ pub async fn parse_matches(matches: &ArgMatches) -> Result<(), ExitCode> {
     Ok(())
 }
 
+use crate::metadata::CrateMetadata;
+
 pub struct Manifest {
     crate_name: String,
     crate_path: PathBuf,
     cargo_toml: PathBuf,
+    target_dir: PathBuf,
+    meta: CrateMetadata,
 }
 
 pub struct Manifests {
@@ -166,119 +168,72 @@ pub struct Manifests {
 }
 
 fn get_crate_paths() -> Manifests {
-    let kernel_manifest_dir_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .or_else(|_| {
-            debug!("CARGO_MANIFEST_DIR not set. Using current directory");
-            std::env::current_dir()
-        })
-        .expect("Failed to a cargo manifest path");
-    if !kernel_manifest_dir_path.is_dir() {
-        panic!(
-            "Manifest path does not point to a directory {}",
-            kernel_manifest_dir_path.to_str().unwrap()
-        );
-    }
-    debug!(
-        "Kernel manifest dir path: {}",
-        kernel_manifest_dir_path.display()
-    );
+    let kernel_manifest = {
+        let kernel_crate_path: PathBuf = env::var("CARGO_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .or_else(|_| {
+                debug!("CARGO_MANIFEST_DIR not set. Using current directory");
+                std::env::current_dir()
+            })
+            .expect("Failed to a cargo manifest path");
+        if !kernel_crate_path.is_dir() {
+            panic!(
+                "Manifest path does not point to a directory {}",
+                kernel_crate_path.to_str().unwrap()
+            );
+        }
+        debug!("Kernel manifest dir path: {}", kernel_crate_path.display());
 
-    let kernel_manifest_file_path = kernel_manifest_dir_path.join("Cargo.toml");
-    if !kernel_manifest_file_path.is_file() {
-        panic!(
-            "Manifest path does not contain a Cargo.toml {}",
-            kernel_manifest_file_path.to_str().unwrap()
-        );
-    }
-
-    let kernel_name: String = {
-        let kernel_names = get_crate_names(&kernel_manifest_file_path);
-        if kernel_names.len() > 1 {
-            panic!("Crate generates more then one binary. Only one supported");
+        let kernel_cargo_toml = kernel_crate_path.join("Cargo.toml");
+        if !kernel_cargo_toml.is_file() {
+            panic!(
+                "Manifest path does not contain a Cargo.toml {}",
+                kernel_cargo_toml.to_str().unwrap()
+            );
         }
 
-        kernel_names
-            .get(0)
-            .expect("Failed to get crate name")
-            .to_string()
+        let kernel_meta = CrateMetadata::new(&kernel_cargo_toml);
+        let kernel_names = kernel_meta.get_crate_names();
+        if kernel_names.len() != 1 {
+            panic!(
+                "Expected crate to generate exactly one binary, generates however {}",
+                kernel_names.len()
+            );
+        }
+        Manifest {
+            crate_name: kernel_names.first().unwrap().to_string(),
+            crate_path: kernel_crate_path,
+            cargo_toml: kernel_cargo_toml,
+            target_dir: kernel_meta.get_target_dir(),
+            meta: kernel_meta,
+        }
     };
 
-    let bootloader_crate_path = get_dep_crate_path(&kernel_manifest_file_path, "bootloader");
-    let bootloader_manifest_path = bootloader_crate_path.join("Cargo.toml");
-    if !bootloader_manifest_path.is_file() {
-        panic!(
-            "Manifest path does not contain a Cargo.toml {}",
-            bootloader_manifest_path.to_str().unwrap()
-        );
-    }
+    let bootloader_manifest = {
+        let boot_crate_path = kernel_manifest.meta.get_crate_of_dependency("bootloader");
+        let boot_cargo_toml = boot_crate_path.join("Cargo.toml");
+        if !boot_cargo_toml.is_file() {
+            panic!("Couldn't find Cargo.toml in {}", boot_cargo_toml.display())
+        }
+        let boot_meta = CrateMetadata::new(&boot_cargo_toml);
+        let boot_names = boot_meta.get_crate_names();
+        if boot_names.len() != 1 {
+            panic!(
+                "Expected crate to generate exactly one binary, generates however {}",
+                boot_names.len()
+            );
+        }
+        Manifest {
+            crate_name: boot_names.first().unwrap().to_string(),
+            crate_path: boot_crate_path,
+            cargo_toml: boot_cargo_toml,
+            target_dir: boot_meta.get_target_dir(),
+            meta: boot_meta,
+        }
+    };
 
     Manifests {
-        kernel: Manifest {
-            crate_name: kernel_name,
-            crate_path: kernel_manifest_dir_path,
-            cargo_toml: kernel_manifest_file_path,
-        },
-        bootloader: Manifest {
-            crate_name: "bootloader".to_string(),
-            crate_path: bootloader_crate_path,
-            cargo_toml: bootloader_manifest_path,
-        },
+        bootloader: bootloader_manifest,
+        kernel: kernel_manifest,
     }
-}
-
-fn get_crate_names(manifest_file_path: &Path) -> Vec<String> {
-    let metadata = cargo_metadata::MetadataCommand::new()
-        .manifest_path(manifest_file_path)
-        .exec()
-        .unwrap();
-    metadata
-        .workspace_members
-        .into_iter()
-        .map(|x| {
-            x.to_string()
-                .split_ascii_whitespace()
-                .next()
-                .unwrap()
-                .to_string()
-        })
-        .collect()
-}
-
-fn get_dep_crate_path(manifest_file: &Path, dep_name: &str) -> PathBuf {
-    let metadata = cargo_metadata::MetadataCommand::new()
-        .manifest_path(manifest_file)
-        .exec()
-        .expect("Manifest path is incorrect");
-
-    let kernel_pkg = metadata
-        .packages
-        .iter()
-        .find(|p| p.manifest_path == manifest_file)
-        .expect("Couldn't find package with same manifest as kernel in metadata");
-
-    let bootloader_name = kernel_pkg
-        .dependencies
-        .iter()
-        .find(|d| d.rename.as_ref().unwrap_or(&d.name) == dep_name)
-        .unwrap_or_else(|| panic!("Couldn't find needed dependency '{}' in kernel", dep_name))
-        .name
-        .clone();
-
-    let bootloader_pkg = metadata
-        .packages
-        .iter()
-        .find(|p| p.name == bootloader_name)
-        .unwrap();
-
-    let bootloader_manifest = bootloader_pkg
-        .manifest_path
-        .clone()
-        .to_path_buf()
-        .into_std_path_buf();
-    debug!(
-        "Dependency {} crate location: {:?}",
-        dep_name, bootloader_manifest
-    );
-    bootloader_manifest.parent().unwrap().to_path_buf()
 }

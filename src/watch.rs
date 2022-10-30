@@ -111,67 +111,57 @@ pub async fn glue_gun_watch(
 
     // Block below gets executed on file change
     runtime.on_action(move |action: Action| {
-        let kernel_exec_path = kernel_exec_path.clone();
-        let manifests = manifests.clone();
-        let file_whitelist = file_whitelist.clone();
+        let fut = async { Ok::<(), RuntimeError>(()) };
 
-        async move {
-            let fut = Ok::<(), RuntimeError>(());
+        // Iter over events
+        for event in action.events.iter() {
+            debug!("event: {:?}", event);
 
-            // Iter over events
-            for event in action.events.iter() {
-                debug!("event: {:?}", event);
-
-                // Check for Ctrl+C or SIGTERM signal
-                if event.signals().any(|x| {
-                    matches!(
-                        x,
-                        MainSignal::Interrupt | MainSignal::Quit | MainSignal::Terminate
-                    )
-                }) {
-                    action.outcome(Outcome::both(Outcome::Stop, Outcome::Exit));
-                    return fut;
-                }
-
-                let mut is_whitelisted = event
-                    .paths()
-                    .any(|p| file_whitelist.contains(&p.0.to_path_buf()));
-
-                // Iterator over file event kind (created, modified, etc)
-                let event_kinds = event.tags.iter().filter_map(|p| match p {
-                    watchexec::event::Tag::FileEventKind(event_kind) => Some(event_kind),
-                    _ => None,
-                });
-
-                for ek in event_kinds {
-                    // // If file has been created recompute file whitelist
-                    // if e.is_create() {
-                    //     file_whitelist = compute_whitelist(watch_dirs.clone());
-                    //     is_whitelisted = event
-                    //         .paths()
-                    //         .any(|p| file_whitelist.contains(&p.0.to_path_buf()));
-                    // }
-
-                    // If file has been modified or removed and is in whitelist
-                    // rebuild and return.
-                    if (ek.is_modify() || ek.is_remove()) && is_whitelisted {
-                        info!("file changed: {:?}", event);
-
-                        let _artifacts = crate::build::glue_gun_build(
-                            &kernel_exec_path.clone(),
-                            &manifests.clone(),
-                            &cli_options.clone(),
-                        )
-                        .await;
-
-                        return fut;
-                    }
-                }
+            // Check for Ctrl+C or SIGTERM signal
+            if event.signals().any(|x| {
+                matches!(
+                    x,
+                    MainSignal::Interrupt | MainSignal::Quit | MainSignal::Terminate
+                )
+            }) {
+                action.outcome(Outcome::both(Outcome::Stop, Outcome::Exit));
+                return fut;
             }
 
-            action.outcome(Outcome::DoNothing);
-            fut
+            let mut is_whitelisted = event
+                .paths()
+                .any(|p| file_whitelist.contains(&p.0.to_path_buf()));
+
+            // Iterator over file event kind (created, modified, etc)
+            let event_kinds = event.tags.iter().filter_map(|p| match p {
+                watchexec::event::Tag::FileEventKind(event_kind) => Some(event_kind),
+                _ => None,
+            });
+
+            for ek in event_kinds {
+                // // If file has been created recompute file whitelist
+                // if e.is_create() {
+                //     file_whitelist = compute_whitelist(watch_dirs.clone());
+                //     is_whitelisted = event
+                //         .paths()
+                //         .any(|p| file_whitelist.contains(&p.0.to_path_buf()));
+                // }
+
+                // If file has been modified or removed and is in whitelist
+                // rebuild and return.
+                if (ek.is_modify() || ek.is_remove()) && is_whitelisted {
+                    info!("file changed: {:?}", event);
+
+                    let _artifacts =
+                        crate::build::glue_gun_build(&kernel_exec_path, &manifests, &cli_options);
+
+                    return fut;
+                }
+            }
         }
+
+        action.outcome(Outcome::DoNothing);
+        fut
     });
 
     we.reconfigure(runtime).unwrap();

@@ -245,20 +245,12 @@ pub fn cargo_build(
     if is_verbose {
         cmd.arg("-vv");
     }
+    cmd.arg("--message-format").arg("json");
 
-    cmd.stdout(process::Stdio::inherit());
+    cmd.stdout(process::Stdio::piped());
     cmd.stderr(process::Stdio::inherit());
     debug!("Running command: {:#?}", cmd);
 
-    let output = cmd.output().expect("Failed to build bootloader crate");
-    if !output.status.success() {
-        panic!("Failed to build bootloader crate");
-    }
-
-    // Redo build just to parse out json and get executable paths
-    cmd.arg("--message-format").arg("json");
-    cmd.stderr(process::Stdio::piped());
-    cmd.stdout(process::Stdio::piped());
     let output = cmd.output().expect("Failed to build bootloader crate");
     if !output.status.success() {
         panic!(

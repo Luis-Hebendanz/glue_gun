@@ -9,7 +9,7 @@ mod run;
 async fn main() {
     simple_logger::SimpleLogger::new()
         .with_level(LevelFilter::Trace)
-        .with_timestamps(false)
+        .without_timestamps()
         .init()
         .unwrap();
     log::set_max_level(LevelFilter::Info);

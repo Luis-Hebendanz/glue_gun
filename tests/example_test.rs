@@ -7,7 +7,7 @@ fn setup_tests() {
     START.call_once(|| {
         simple_logger::SimpleLogger::new()
             .with_level(log::LevelFilter::Trace)
-            .with_timestamps(false)
+            .without_timestamps()
             .init()
             .unwrap();
         log::set_max_level(log::LevelFilter::Debug);
